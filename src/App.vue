@@ -210,32 +210,38 @@ async function handleScreenshot() {
     return;
   }
   try {
-    const result = await snapdom(target);
-    const filename = `${(titleValue.value || 'snippet').replace(/\s+/g, '_')}_${Date.now()}`;
-    if (typeof result.download === 'function') {
-      await result.download({ format: 'png', filename });
-    } else {
-      const blob = await result.toBlob({ format: 'png' });
-      triggerDownload(blob, filename + '.png');
-    }
+    // 等待两帧，确保布局稳定
+    await new Promise((resolve) => requestAnimationFrame(() => resolve()));
+    await new Promise((resolve) => requestAnimationFrame(() => resolve()));
 
-    const rawBlob = typeof result.toBlob === 'function' ? await result.toBlob() : null;
-    if (rawBlob) {
+    const filename = `${(titleValue.value || 'snippet').replace(/\s+/g, '_')}_${Date.now()}`;
+    const snapOptions = {
+      type: 'png',
+      scale: 2,
+      backgroundColor: '#ffffff',
+      cache: 'full',
+      fast: false,
+      placeholders: true,
+    };
+
+    let blob = null;
+    try {
+      blob = await snapdom.toBlob(target, snapOptions);
+    } catch (err) {
+      console.warn('snapdom.toBlob 失败，尝试 canvas 兜底', err);
       try {
-        const thumbBlob = await compressBlob(rawBlob, 300);
-        const thumbData = await blobToDataUrl(thumbBlob);
-        await store.updatePage(currentPage.value.id, { thumbnail: thumbData });
-        showToast('已截图');
-        await store.loadPages();
-      } catch (err) {
-        console.warn('缩略图生成失败，使用原图占位', err);
-        const fallback = await blobToDataUrl(rawBlob);
-        await store.updatePage(currentPage.value.id, { thumbnail: fallback });
-        showToast('截图完成（缩略图降级）');
+        const canvas = await snapdom.toCanvas(target, snapOptions);
+        blob = await new Promise((resolve, reject) =>
+          canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('canvas toBlob failed'))), 'image/png'),
+        );
+      } catch (err2) {
+        console.warn('canvas 兜底失败', err2);
       }
-    } else {
-      showToast('截图完成，但缩略图未生成');
     }
+    if (!blob || !blob.size) throw new Error('未能获取截图数据');
+
+    triggerDownload(blob, `${filename}.png`);
+    await createThumbnailFromBlob(blob);
   } catch (err) {
     console.error(err);
     showToast('截图失败');
@@ -270,31 +276,23 @@ function triggerDownload(blob, filename) {
   URL.revokeObjectURL(url);
 }
 
-function compressBlob(blob, targetWidth) {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    const url = URL.createObjectURL(blob);
-    img.onload = () => {
-      const scale = targetWidth / img.width;
-      const canvas = document.createElement('canvas');
-      canvas.width = targetWidth;
-      canvas.height = Math.round(img.height * scale);
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-      canvas.toBlob(
-        (newBlob) => {
-          if (newBlob) resolve(newBlob);
-          else reject(new Error('Compression failed'));
-        },
-        'image/png',
-        0.9,
-      );
-      URL.revokeObjectURL(url);
-    };
-    img.onerror = reject;
-    img.src = url;
-  });
+function triggerDownloadByUrl(url, filename) {
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
 }
+
+async function createThumbnailFromBlob(blob) {
+  const data = await blobToDataUrl(blob);
+  const pageId = currentPage.value?.id;
+  if (!pageId) return;
+  await store.updatePage(pageId, { thumbnail: data });
+  await store.loadPages();
+  await store.setCurrentPage(pageId);
+  showToast('已截图（缩略图已更新）');
+}
+
 
 function onPreviewLoad() {
   attachHeightObservers();
@@ -507,7 +505,7 @@ function attachHeightObservers() {
         <iframe
           v-else
           ref="iframeRef"
-          :key="`${currentPage?.id || 'preview'}-${currentPage?.updatedAt || 0}-${mode}`"
+          :key="`${currentPage?.id || 'preview'}-${mode}`"
           class="preview"
           title="Preview"
           :srcdoc="previewSrcdoc"
