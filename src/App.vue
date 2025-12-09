@@ -390,19 +390,22 @@ function stopHeightSync() {
 }
 
 function attachHeightObservers() {
+  stopHeightSync();
   const frame = iframeRef.value;
   if (!frame) return;
   const doc = frame.contentDocument;
-  const target = doc?.documentElement || doc?.body;
-  if (!target) return;
+  const body = doc?.body;
+  const html = doc?.documentElement;
+  const shell = doc?.getElementById('runner-shell');
+  if (!doc || !body) return;
 
-  // Resize changes (layout)
-  resizeObserver = new ResizeObserver(() => scheduleHeightSync(4, 80));
-  resizeObserver.observe(target);
+  resizeObserver = new ResizeObserver(() => scheduleHeightSync(6, 80));
+  resizeObserver.observe(body);
+  if (html) resizeObserver.observe(html);
+  if (shell) resizeObserver.observe(shell);
 
-  // DOM mutations that may change height
-  mutationObserver = new MutationObserver(() => scheduleHeightSync(4, 80));
-  mutationObserver.observe(target, {
+  mutationObserver = new MutationObserver(() => scheduleHeightSync(6, 80));
+  mutationObserver.observe(body, {
     subtree: true,
     childList: true,
     attributes: true,
@@ -425,8 +428,8 @@ function attachHeightObservers() {
       <div class="brand">
         <span class="dot"></span>
         <div>
-          <div class="brand-title">LLM HTML 预览盒</div>
-          <div class="brand-sub">本地优先 · 纯前端 · 片段收纳</div>
+          <div class="brand-title">以太画廊 Ether Gallery</div>
+          <div class="brand-sub">每一次对话，都是一张未完成的画卷</div>
         </div>
       </div>
       <div class="top-actions">
@@ -521,5 +524,11 @@ function attachHeightObservers() {
     </div>
 
     <div v-if="toast" class="toast">{{ toast }}</div>
+
+    <footer class="footer">
+      <a href="https://github.com/senzi/llm-render-box" target="_blank" rel="noreferrer">GitHub</a>
+      <span>· MIT</span>
+      <span>· vibe coding</span>
+    </footer>
   </div>
 </template>
